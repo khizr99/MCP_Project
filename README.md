@@ -1,2 +1,3 @@
+# MCP Multi-Agent Orchestration Framework
 
 This is our project folder for MCP. We will be working here...
