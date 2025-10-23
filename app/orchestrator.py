@@ -74,7 +74,9 @@ class OrchestrationEngine:
         )
         
         self.workflows[workflow.workflow_id] = workflow
+        # store and log immediately to ensure the workflow is discoverable by status queries
         self.log(f"Created workflow: {workflow.workflow_id} - {workflow.name}")
+        self.log(f"Stored workflow in orchestrator state: {workflow.workflow_id}")
         
         # Generate task plan using Planner Agent
         await self._plan_workflow(workflow, db_session)
