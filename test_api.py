@@ -168,6 +168,45 @@ def test_quick_upgrade(customer_id):
         return None
 
 
+def test_validator_blocks_negative_credit_limit():
+    """Pytest-compatible test to ensure validator blocks negative credit_limit."""
+    body = {
+        "name": "Validator Unit Test - negative credit",
+        "description": "Should be blocked by validator pre-exec",
+        "operation": "update",
+        "target_customer_id": "CUST001",
+        "parameters": {"credit_limit": -999}
+    }
+
+    r = requests.post(f"{BASE_URL}/api/workflows", json=body)
+    assert r.status_code == 200
+    data = r.json()
+    workflow_id = data["workflow_id"]
+
+    # poll for terminal status (tolerate transient 404s from the server startup/state)
+    w = None
+    for attempt in range(40):
+        r2 = requests.get(f"{BASE_URL}/api/workflows/{workflow_id}")
+        # If server returns 404 briefly, wait and retry (server may not have registered workflow yet)
+        if r2.status_code == 404:
+            time.sleep(0.25)
+            continue
+        assert r2.status_code == 200
+        w = r2.json()
+        if w["status"] not in ("pending", "running"):
+            break
+        # gradually increase wait between polls
+        time.sleep(0.25 + (attempt * 0.01))
+
+    assert w is not None
+    # Ensure validator ran and produced an invalid result
+    current = w.get("current_task") or {}
+    assert current.get("agent_type") == "validator"
+    result = current.get("result") or {}
+    assert result.get("result", {}).get("valid") is False
+    assert "credit_limit cannot be negative" in (result.get("result", {}).get("errors") or [])
+
+
 def main():
     """Run all tests"""
     print("\n")

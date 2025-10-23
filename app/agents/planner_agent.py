@@ -87,11 +87,11 @@ class PlannerAgent(BaseAgent):
         
         tasks = []
         
-        # Add validation task
+        # Add pre-execution validation task (handled by ValidatorAgent)
         tasks.append({
             "task_id": str(uuid.uuid4()),
             "description": f"Validate {operation} request",
-            "agent_type": "planner",
+            "agent_type": "validator",
             "status": "pending",
             "priority": 1,
             "parameters": {
