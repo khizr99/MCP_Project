@@ -9,7 +9,7 @@ from app.models.workflow import (
     Task, TaskStatus, AgentType
 )
 from app.models.message import AgentMessage, MessageType
-from app.agents import PlannerAgent, ExecutorAgent
+from app.agents import PlannerAgent, ExecutorAgent, ValidatorAgent
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import uuid
@@ -32,6 +32,7 @@ class OrchestrationEngine:
         self.workflows: Dict[str, WorkflowState] = {}
         self.planner_agent = PlannerAgent()
         self.executor_agent = ExecutorAgent()
+        self.validator_agent = ValidatorAgent()
         self.max_concurrent_workflows = 5
         self.log("Orchestration Engine initialized")
     
@@ -55,9 +56,9 @@ class OrchestrationEngine:
         
         if active_workflows >= self.max_concurrent_workflows:
             return WorkflowResponse(
-                workflow_id="",
+                workflow_id=None,
                 status=WorkflowStatus.FAILED,
-                message="Maximum concurrent workflows reached",
+                message=f"Maximum concurrent workflows ({self.max_concurrent_workflows}) reached",
                 progress=0
             )
         
@@ -206,11 +207,41 @@ class OrchestrationEngine:
                             "description": task.description,
                             "parameters": {**task.parameters, **workflow.context}
                         })
+                    elif task.agent_type == AgentType.VALIDATOR:
+                        result = await self.validator_agent.execute_task({
+                            "description": task.description,
+                            "parameters": {**task.parameters, **workflow.context}
+                        })
                     else:
-                        # Validator or other agents - placeholder
+                        # Unknown agent types are simulated
                         result = {"status": "success", "message": "Task simulated"}
                     
                     task.result = result
+
+                    # If this is a validator pre-execution check and it failed, abort the workflow
+                    try:
+                        is_validator = task.agent_type == AgentType.VALIDATOR
+                        validation_type = task.parameters.get("validation_type") if isinstance(task.parameters, dict) else None
+                        valid_flag = None
+                        if isinstance(result, dict):
+                            # expected shape: {"status":..., "result": {"valid": bool, ...}}
+                            valid_flag = result.get("result", {}).get("valid")
+
+                        if is_validator and validation_type == "pre_execution" and valid_flag is False:
+                            task.status = TaskStatus.FAILED
+                            task.completed_at = datetime.utcnow()
+                            task.error = "Pre-execution validation failed"
+                            workflow.status = WorkflowStatus.FAILED
+                            workflow.error = f"Validation failed: {result.get('result', {}).get('errors', [])}"
+                            workflow.completed_at = datetime.utcnow()
+                            self.log(f"Workflow {workflow.workflow_id} failed due to validation errors: {workflow.error}")
+                            # stop executing further tasks
+                            break
+
+                    except Exception:
+                        # if we can't parse validator result for some reason, continue as normal
+                        pass
+
                     task.status = TaskStatus.COMPLETED
                     task.completed_at = datetime.utcnow()
                     
